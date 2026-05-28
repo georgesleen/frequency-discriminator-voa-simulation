@@ -20,7 +20,7 @@ against a collaborator's Lumerical run for validation.
 ### NixOS (recommended on this machine)
 
 ```bash
-cd simulation_scripts/python
+cd python
 nix develop      # provides python 3.12 + openblas + gmsh
 uv sync          # populates .venv with DEVSIM, femwell, etc.
 ```
@@ -36,7 +36,7 @@ Make sure `libopenblas.so` is on the loader path (or set
 `DEVSIM_MATH_LIBS` and `LD_LIBRARY_PATH` manually), then:
 
 ```bash
-cd simulation_scripts/python
+cd python
 uv sync
 ```
 

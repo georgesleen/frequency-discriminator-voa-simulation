@@ -1,7 +1,7 @@
 """DEVSIM PIN-junction drift-diffusion simulation.
 
 Open-source replacement for the Lumerical CHARGE script
-(``simulation_scripts/Charge_Simulation.lsf``). Produces ``carriers.npz``,
+(``../Charge_Simulation.lsf``). Produces ``carriers.npz``,
 which the downstream mode-solver script (``mode_sim.py``) reads to apply
 the Soref-Bennett free-carrier perturbation.
 

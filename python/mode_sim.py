@@ -1,7 +1,7 @@
 """femwell waveguide eigenmode solve with Soref-Bennett carrier perturbation.
 
 Open-source replacement for the Lumerical MODE/FDE script
-(``simulation_scripts/Mode_Simulation.lsf``). Reads ``carriers.npz`` written
+(``../Mode_Simulation.lsf``). Reads ``carriers.npz`` written
 by ``charge_sim.py``, applies the Soref-Bennett free-carrier dispersion
 model to convert (Δn_e, Δn_h) into a complex permittivity perturbation, and
 solves the fundamental quasi-TE eigenmode of the silicon rib waveguide at

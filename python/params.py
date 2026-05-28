@@ -1,6 +1,6 @@
 """PIN-junction modulator geometry and doping parameters.
 
-Direct port of ``simulation_scripts/PN_Junction_Setup.lsf``. Variable names
+Direct port of ``../PN_Junction_Setup.lsf``. Variable names
 match the LSF script line-for-line so the two sources can be diffed side by
 side when validating against the Lumerical pipeline.
 
