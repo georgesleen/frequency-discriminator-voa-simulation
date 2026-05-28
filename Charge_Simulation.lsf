@@ -1,0 +1,149 @@
+# Charge Simulation of PIN VOA
+newproject; redrawoff;
+
+# modulator geometry variables defined:
+PN_Junction_Setup;
+
+addmodelmaterial;
+set("name","silicon");
+set("color", [0.8;0;0.5;1]);
+addmaterialproperties("EM","Si (Silicon) - Palik");
+select("materials::silicon");
+addmaterialproperties("CT","Si (Silicon)");
+select("materials::silicon");
+addmaterialproperties("HT","Si (Silicon)");
+
+addmodelmaterial;
+set("name","aluminium");
+set("color", [0.4;0.4;0.4;1]);
+addmaterialproperties("EM","Al (Aluminium) - Palik");
+select("materials::aluminium");
+addmaterialproperties("CT","Al (Aluminium) - CRC");
+select("materials::aluminium");
+addmaterialproperties("HT","Al (Aluminium) - CRC");
+
+addmodelmaterial;
+set("name","silicon_oxide");
+set("color", [0.8;0.7;0;1]);
+addmaterialproperties("EM","SiO2 (Glass) - Palik");
+select("materials::silicon_oxide");
+addmaterialproperties("CT","SiO2 (Glass) - Sze");
+select("materials::silicon_oxide");
+addmaterialproperties("HT","SiO2 (Glass) - Sze");
+
+# draw geometry
+addrect; # rib
+set("name","rib");
+set("material","silicon");
+set("x",x_center); set("x span",width_rib);
+set("y",y_center); set("y span",y_span);
+set("z min",z_center+thick_slab); set("z max",thick_slab+thick_rib);
+
+addrect; # slab
+set("name","slab");
+set("material","silicon");
+set("override color opacity from material database",1);
+set("alpha",0.7);
+set("x",x_center); set("x span",width_slab);
+set("y",y_center); set("y span",y_span);
+set("z min",z_center); set("z max",thick_slab);
+
+addrect; # contacts
+set("name","anode");
+set("material","aluminium");
+set("x",-center_contact); set("x span",width_contact);
+set("y",y_center); set("y span",y_span);
+set("z min",z_center+thick_slab); set("z max",z_center+thick_slab+thick_contact);
+
+copy;
+set("name","cathode");
+set("x",center_contact);
+
+addrect; # oxide
+set("name","oxide");
+set("material","silicon_oxide");
+set("mesh order",5);
+set("override color opacity from material database",1);
+set("alpha",0.3);
+set("x",x_center); set("x span",x_span);
+set("y",y_center); set("y span",y_span);
+set("z",z_center); set("z span",z_span);
+
+# draw simulation region
+addchargesolver;
+set("min edge length",min_edge_length);
+set("max edge length",max_edge_length);
+set("solver type","newton"); # forward bias
+select("simulation region");
+set("x",x_center); set("x span",x_span-0.1e-6);
+set("y",y_center); set("y span",y_span);
+set("z",z_center); set("z span",z_span);
+
+addmesh;
+set("name","wg mesh");
+set("max edge length",max_edge_length_override);
+set("x",x_center); set("x span",width_rib);
+set("y",y_center); set("y span",y_span);
+set("z min",z_center); set("z max",z_center+thick_slab+thick_rib);
+set("enabled",0);
+
+# draw doping regions
+adddope; # adds a constant doping region
+set("name","pepi");
+set("dopant type","p"); # p type
+set("x",x_center); set("x span",x_span);
+set("y",y_center); set("y span",y_span);
+set("z",center_pepi); set("z span",thick_pepi);
+
+adddiffusion;
+set("name","p++ implant");
+set("x",x_center_p); set("x span",x_span_p);
+set("y",y_center); set("y span",y_span);
+set("z min",z_center); set("z max",z_center+thick_slab);
+set("dopant type","p");
+set("face type",face_p);
+set("junction width",width_junction_p);
+set("distribution index",diff_dist_fcn);
+set("concentration",surface_conc_p);
+set("ref concentration",reference_conc_p);
+
+adddiffusion;
+set("name","n++ implant");
+set("x",x_center_n); set("x span",x_span_n);
+set("y",y_center); set("y span",y_span);
+set("z min",z_center); set("z max",z_center+thick_slab);
+set("dopant type","n");
+set("face type",face_n);
+set("junction width",width_junction_n);
+set("distribution index",diff_dist_fcn);
+set("concentration",surface_conc_n);
+set("ref concentration",reference_conc_n);
+
+# draw monitors
+addchargemonitor; # capacitance
+set("monitor type",6); # 2D y-normal
+set("integrate total charge",1);
+set("x",x_center); set("x span",x_span);
+set("z min",z_center); set("z max",z_center+thick_slab+thick_rib);
+set("save data",1);
+set("filename","PIN_Charge");
+
+# set contacts
+addelectricalcontact; # anode
+set("name","anode");
+set("bc mode","steady state");
+set("sweep type","value");
+V = voltage_start:voltage_interval:voltage_stop;
+set("value table",V);
+set("surface type","solid");
+set("solid","anode");
+
+addelectricalcontact; # cathode
+set("name","cathode");
+set("surface type","solid");
+set("solid","cathode");
+
+# simulate the DC characteristics of the junction,
+# export the spatial charge density, for different voltages
+save("Charge_Simulation.ldev");
+run;
