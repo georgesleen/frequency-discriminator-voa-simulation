@@ -20,15 +20,13 @@ against a collaborator's Lumerical run for validation.
 ### NixOS (recommended on this machine)
 
 ```bash
-cd python
-nix develop      # provides python 3.12 + openblas + gmsh
+nix develop      # provides python 3.12 + openblas + gmsh + libstdc++
 uv sync          # populates .venv with DEVSIM, femwell, etc.
 ```
 
-DEVSIM dlopens BLAS/LAPACK at runtime; the devshell sets
-`LD_LIBRARY_PATH` and `DEVSIM_MATH_LIBS` so it finds the nix-store
-openblas. Without the devshell, `import devsim` will fail with
-"MISSING DLL".
+DEVSIM dlopens BLAS/LAPACK and libstdc++ at runtime; the devshell sets
+`LD_LIBRARY_PATH` so it finds them in the nix store. Without the devshell,
+`import devsim` will fail with "cannot open shared object file".
 
 ### Other Linux
 
@@ -36,7 +34,6 @@ Make sure `libopenblas.so` is on the loader path (or set
 `DEVSIM_MATH_LIBS` and `LD_LIBRARY_PATH` manually), then:
 
 ```bash
-cd python
 uv sync
 ```
 
@@ -46,8 +43,8 @@ scipy, and matplotlib into a project-local `.venv/`.
 ## Run
 
 ```bash
-uv run python charge_sim.py     # → carriers.npz + pin_mesh.msh
-uv run python mode_sim.py       # → modulator_neff_V.dat + neff_vs_V.png
+uv run src/charge_sim.py     # → src/carriers.npz + src/pin_mesh.msh
+uv run src/mode_sim.py       # → src/modulator_neff_V.dat + src/neff_vs_V.png
 ```
 
 `charge_sim.py` takes the bulk of the wall time (drift-diffusion at 41

@@ -31,7 +31,7 @@ Caveats:
       an ion-implant approximation with junction_width = 0.
 
 Run:
-    uv run python charge_sim.py    # produces carriers.npz next to this file
+    uv run src/charge_sim.py    # produces carriers.npz in src/
 """
 
 from pathlib import Path

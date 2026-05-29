@@ -23,7 +23,7 @@ Coordinate frame note:
     The perturbation callable handles the constant shift internally.
 
 Run:
-    uv run python mode_sim.py     # requires carriers.npz from charge_sim.py
+    uv run src/mode_sim.py     # requires carriers.npz from charge_sim.py
 """
 
 from collections import OrderedDict
