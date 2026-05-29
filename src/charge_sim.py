@@ -21,6 +21,12 @@ The mesh is L-shaped (silicon polygon) rather than a bounding rectangle so
 the rib protrudes correctly above the slab — this matches the geometry the
 Lumerical LSF builds via two overlapping rectangles.
 
+Units:
+    DEVSIM's bundled silicon physics (devsim.python_packages.simple_physics)
+    works in CGS (cm, cm^-3). params.py is in SI; M2CM and M3_TO_CM3 do the
+    conversion at the boundary, and the saved ``carriers.npz`` is back in SI
+    (m, m^-3) for the mode solver.
+
 Caveats:
     - The Lumerical 'adddope' pepi command in the LSF does not specify a
       concentration. We assume a 1e15 cm^-3 p-type background here; adjust
@@ -71,8 +77,14 @@ NPZ_PATH = HERE / "carriers.npz"
 DEVICE = "pin"
 REGION = "bulk"
 
+# DEVSIM's simple_physics.py is written in CGS (cm, cm^-3). All mesh coordinates
+# and doping expressions must use cm; outputs are converted back to SI on save.
+M2CM = 100.0       # multiply SI metres → cm
+M3_TO_CM3 = 1e-6   # multiply SI m^-3   → cm^-3
+CM3_TO_M3 = 1e6    # multiply CGS cm^-3 → m^-3
+
 # Background p-epi concentration (LSF leaves this unspecified; typical Lumerical default).
-PEPI_CONC = 1e15 * 1e6  # m^-3
+PEPI_CONC = 1e15  # cm^-3
 
 
 def build_mesh(path: Path) -> None:
@@ -91,21 +103,25 @@ def build_mesh(path: Path) -> None:
     rib corners (~7 nm) to resolve the depletion-edge gradient, and the
     coarser ``max_edge_length`` everywhere else.
 
+    Coordinates are written in cm (CGS) so DEVSIM's silicon physics is
+    self-consistent. DEVSIM only reads gmsh MSH 2.x, not the default 4.x.
+
     Args:
         path: Destination ``.msh`` file path.
     """
-    xs = p.width_slab / 2
-    rs = p.width_rib / 2
-    cl = p.center_contact - p.width_contact / 2  # contact inner edge (absolute)
-    cr = p.center_contact + p.width_contact / 2  # contact outer edge
+    xs = p.width_slab / 2 * M2CM
+    rs = p.width_rib / 2 * M2CM
+    cl = (p.center_contact - p.width_contact / 2) * M2CM  # contact inner edge (cm)
+    cr = (p.center_contact + p.width_contact / 2) * M2CM  # contact outer edge (cm)
     y0 = 0.0
-    y1 = p.thick_slab
-    y2 = p.thick_slab + p.thick_rib
-    lc_coarse = p.max_edge_length
-    lc_fine = p.max_edge_length_override
+    y1 = p.thick_slab * M2CM
+    y2 = (p.thick_slab + p.thick_rib) * M2CM
+    lc_coarse = p.max_edge_length * M2CM
+    lc_fine = p.max_edge_length_override * M2CM
 
     gmsh.initialize()
     gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)  # DEVSIM only reads MSH2
     gmsh.model.add("pin")
     geo = gmsh.model.geo
 
@@ -179,12 +195,15 @@ def set_doping() -> None:
     Step functions implement the lateral implant window. DEVSIM evaluates
     these expressions per node — ``x`` and ``y`` refer to node coordinates.
     """
-    p_left = p.x_center_p - p.x_span_p / 2
-    p_right = p.x_center_p + p.x_span_p / 2
-    n_left = p.x_center_n - p.x_span_n / 2
-    n_right = p.x_center_n + p.x_span_n / 2
-    sigma_y = p.thick_slab / 3.0
-    y_top = p.thick_slab  # implant source face (LSF face_p = 5 = upper z)
+    # All geometry in cm (DEVSIM CGS); concentrations in cm^-3.
+    p_left = (p.x_center_p - p.x_span_p / 2) * M2CM
+    p_right = (p.x_center_p + p.x_span_p / 2) * M2CM
+    n_left = (p.x_center_n - p.x_span_n / 2) * M2CM
+    n_right = (p.x_center_n + p.x_span_n / 2) * M2CM
+    sigma_y = p.thick_slab / 3.0 * M2CM
+    y_top = p.thick_slab * M2CM  # implant source face (LSF face_p = 5 = upper z)
+    conc_p_cm3 = p.surface_conc_p * M3_TO_CM3
+    conc_n_cm3 = p.surface_conc_n * M3_TO_CM3
 
     def gaussian_implant(conc: float, xl: float, xr: float) -> str:
         """Return a DEVSIM expression for an implant profile.
@@ -200,8 +219,8 @@ def set_doping() -> None:
             f"       / ({sigma_y:.6e} * {sigma_y:.6e}))"
         )
 
-    p_implant = gaussian_implant(p.surface_conc_p, p_left, p_right)
-    n_implant = gaussian_implant(p.surface_conc_n, n_left, n_right)
+    p_implant = gaussian_implant(conc_p_cm3, p_left, p_right)
+    n_implant = gaussian_implant(conc_n_cm3, n_left, n_right)
 
     node_model(
         device=DEVICE, region=REGION, name="Acceptors",
@@ -264,17 +283,17 @@ def voltage_sweep() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.
 
     Returns:
         A tuple ``(V, x, y, n, p)`` where ``V`` is shape ``(n_V,)``, ``x``
-        and ``y`` are node coordinates shape ``(N,)``, and ``n``, ``p``
-        carrier-density arrays are shape ``(n_V, N)``. Densities are in
-        m^-3 (DEVSIM SI convention).
+        and ``y`` are node coordinates shape ``(N,)`` in metres, and
+        ``n``, ``p`` carrier-density arrays are shape ``(n_V, N)`` in m^-3.
     """
     voltages = np.arange(
         p.voltage_start,
         p.voltage_stop + p.voltage_interval / 2,
         p.voltage_interval,
     )
-    x = np.asarray(get_node_model_values(device=DEVICE, region=REGION, name="x"))
-    y = np.asarray(get_node_model_values(device=DEVICE, region=REGION, name="y"))
+    # Node coordinates are in cm (DEVSIM CGS); convert to m for downstream.
+    x = np.asarray(get_node_model_values(device=DEVICE, region=REGION, name="x")) / M2CM
+    y = np.asarray(get_node_model_values(device=DEVICE, region=REGION, name="y")) / M2CM
 
     n_arr = np.empty((len(voltages), len(x)))
     p_arr = np.empty_like(n_arr)
@@ -282,12 +301,13 @@ def voltage_sweep() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.
     for i, V in enumerate(voltages):
         set_parameter(device=DEVICE, name=GetContactBiasName("anode"), value=float(V))
         solve(type="dc", absolute_error=1e10, relative_error=1e-10, maximum_iterations=30)
+        # Carrier densities from DEVSIM are in cm^-3; convert to m^-3 for storage.
         n_arr[i] = np.asarray(
             get_node_model_values(device=DEVICE, region=REGION, name="Electrons")
-        )
+        ) * CM3_TO_M3
         p_arr[i] = np.asarray(
             get_node_model_values(device=DEVICE, region=REGION, name="Holes")
-        )
+        ) * CM3_TO_M3
         print(f"  V = {V:5.2f} V done")
 
     return voltages, x, y, n_arr, p_arr
@@ -313,8 +333,9 @@ def sample_to_grid(
     solver anyway.
 
     Args:
-        x_nodes, y_nodes: per-node coordinates from DEVSIM, shape ``(N,)``.
-        n_arr, p_arr: carrier densities, shape ``(n_V, N)``.
+        x_nodes, y_nodes: per-node coordinates from DEVSIM, shape ``(N,)``,
+                          in metres.
+        n_arr, p_arr: carrier densities, shape ``(n_V, N)``, in m^-3.
         nx, ny: regular grid resolution.
 
     Returns:
