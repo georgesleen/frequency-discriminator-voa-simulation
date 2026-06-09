@@ -1,7 +1,7 @@
 """Carrier density maps for the SOI PIN modulator cross-section.
 
 Reads ``carriers.npz`` written by ``charge_sim.py`` and produces
-``carrier_maps.png`` — two rows of four panels:
+``output/carrier_maps.png`` — two rows of four panels:
 
   Row 1: absolute electron density n(x,y) at four voltages, full slab width.
   Row 2: injected carrier change Δn = n(V) − n(0) at the same voltages,
@@ -22,7 +22,7 @@ import params as p
 
 HERE = Path(__file__).resolve().parent
 NPZ_PATH = HERE / "carriers.npz"
-OUT_PATH = HERE / "carrier_maps.png"
+OUT_PATH = HERE.parent / "output" / "carrier_maps.png"
 
 PLOT_VOLTAGES = [0.0, 1.0, 1.6, 4.0]
 ZOOM_X_UM = 1.5   # µm half-width for the rib-region zoom (row 2)

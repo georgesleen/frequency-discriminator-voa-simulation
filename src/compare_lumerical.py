@@ -26,8 +26,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 PY_DAT = HERE / "modulator_neff_V.dat"
-DEFAULT_LUM_DAT = HERE.parent.parent / "lumerical_data.dat"
-OUT_PNG = HERE / "compare_neff.png"
+DEFAULT_LUM_DAT = HERE.parent / "lumerical" / "lumerical_data.dat"
+OUT_PNG = HERE.parent / "output" / "compare_neff.png"
 
 
 def load_lumerical(path: Path) -> tuple[np.ndarray, int]:
