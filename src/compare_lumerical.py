@@ -1,13 +1,13 @@
 """Compare the Python pipeline's ``modulator_neff_V.dat`` against a
 Lumerical run.
 
-Both files share the same ``[V, Re(Δneff), Im(neff)]`` column layout. The
+Both files share the same ``[V, Re(dneff), Im(neff)]`` column layout. The
 Lumerical export from ``Mode_Simulation.lsf`` concatenates four 41-row
 blocks: two warm-up blocks at numerical-noise level followed by two
 identical copies of the real sweep. This script picks the last block.
 
 Outputs:
-    compare_neff.png     — two-panel overlay (Δneff and Im(neff) vs V) plus
+    compare_neff.png     - two-panel overlay (dneff and Im(neff) vs V) plus
                            a third panel of per-voltage Python/Lumerical
                            ratios in the low-bias regime.
     Prints a side-by-side numerical table to stdout.
@@ -51,7 +51,7 @@ def load_python(path: Path) -> np.ndarray:
 
 
 def print_table(V, py, lu) -> None:
-    """Print V, Re(Δneff) py/lum, Im(neff) py/lum, ratios as a fixed-width table."""
+    """Print V, Re(dneff) py/lum, Im(neff) py/lum, ratios as a fixed-width table."""
     print()
     print("  V       dRe(neff)_py    dRe(neff)_lum   ratio    "
           "Im(neff)_py     Im(neff)_lum    ratio")
@@ -74,7 +74,7 @@ def plot(V, py, lu) -> None:
     ax.plot(V, py[:, 1], marker=".", label="Python (DEVSIM + femwell)")
     ax.plot(V, lu[:, 1], marker="x", label="Lumerical")
     ax.set_xlabel("V (V)")
-    ax.set_ylabel("Re(Δneff)")
+    ax.set_ylabel("Re(dneff)")
     ax.set_title("Real index change vs voltage")
     ax.grid(True)
     ax.legend(fontsize=9)
@@ -94,8 +94,8 @@ def plot(V, py, lu) -> None:
     ax.plot(V[mask], py[mask, 1], marker=".", label="Python")
     ax.plot(V[mask], lu[mask, 1], marker="x", label="Lumerical")
     ax.set_xlabel("V (V)")
-    ax.set_ylabel("Re(Δneff)")
-    ax.set_title("Low-bias zoom (V ≤ 1.0 V)")
+    ax.set_ylabel("Re(dneff)")
+    ax.set_title("Low-bias zoom (V <= 1.0 V)")
     ax.grid(True)
     ax.legend(fontsize=9)
 

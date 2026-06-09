@@ -9,9 +9,9 @@ stores in cm^-3 are converted to m^-3 here (the ``* 1e6`` factor) so they can
 be fed to DEVSIM, which works in SI.
 
 Coordinate convention:
-    x — lateral, across the junction (anode at -x, cathode at +x)
-    z — vertical, slab grows upward from z = 0
-    y — propagation direction (irrelevant for the 2D cross-section solve)
+    x - lateral, across the junction (anode at -x, cathode at +x)
+    z - vertical, slab grows upward from z = 0
+    y - propagation direction (irrelevant for the 2D cross-section solve)
 """
 
 # --- wafer and waveguide structure (220 nm SOI rib) -----------------------
