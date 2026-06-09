@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Nix store cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Fast tier: pure-physics unit tests as a flake check (numpy only,
+      # no MKL / FHS / network).
+      - name: Unit tests (nix flake check)
+        run: nix flake check -L
+
+      # Heavy tier: end-to-end DEVSIM + femwell solve inside the FHS env.
+      # The flake's allowUnfreePredicate scopes MKL, so no extra config.
+      - name: Integration tests (DEVSIM + femwell)
+        run: nix run . -- -c "uv run --group test pytest -m integration -q"
