@@ -18,7 +18,7 @@ Pipeline:
     6. Resample the carrier fields onto a regular (x, y) grid and save.
 
 The mesh is L-shaped (silicon polygon) rather than a bounding rectangle so
-the rib protrudes correctly above the slab — this matches the geometry the
+the rib protrudes correctly above the slab - this matches the geometry the
 Lumerical LSF builds via two overlapping rectangles.
 
 Units:
@@ -58,9 +58,20 @@ from devsim import (
     set_parameter,
     solve,
 )
-from devsim.python_packages.model_create import CreateSolution
+from devsim.python_packages.Klaassen import (
+    Klaassen_Mobility,
+    Set_Mobility_Parameters,
+)
+from devsim.python_packages.model_create import (
+    CreateNodeModel,
+    CreateNodeModelDerivative,
+    CreateSolution,
+)
 from devsim.python_packages.simple_physics import (
-    CreateSiliconDriftDiffusion,
+    CreateBernoulli,
+    CreateECE,
+    CreateHCE,
+    CreatePE,
     CreateSiliconDriftDiffusionAtContact,
     CreateSiliconPotentialOnly,
     CreateSiliconPotentialOnlyContact,
@@ -69,6 +80,7 @@ from devsim.python_packages.simple_physics import (
 )
 
 import params as p
+import physics as ph
 
 HERE = Path(__file__).resolve().parent
 MSH_PATH = HERE / "pin_mesh.msh"
@@ -79,12 +91,18 @@ REGION = "bulk"
 
 # DEVSIM's simple_physics.py is written in CGS (cm, cm^-3). All mesh coordinates
 # and doping expressions must use cm; outputs are converted back to SI on save.
-M2CM = 100.0       # multiply SI metres → cm
-M3_TO_CM3 = 1e-6   # multiply SI m^-3   → cm^-3
-CM3_TO_M3 = 1e6    # multiply CGS cm^-3 → m^-3
+M2CM = 100.0       # multiply SI metres -> cm
+M3_TO_CM3 = 1e-6   # multiply SI m^-3   -> cm^-3
+CM3_TO_M3 = 1e6    # multiply CGS cm^-3 -> m^-3
 
 # Background p-epi concentration (LSF leaves this unspecified; typical Lumerical default).
 PEPI_CONC = 1e15  # cm^-3
+
+# Klaassen mobility divides by Donors (Z_D ~ (Nref_D/Donors)^2), so Donors must
+# be strictly positive everywhere. A 1 cm^-3 floor is numerically negligible
+# against the 1e15 p-epi and 4e20 implant levels. Acceptors are already floored
+# by PEPI_CONC.
+DONOR_FLOOR = 1.0  # cm^-3
 
 
 def build_mesh(path: Path) -> None:
@@ -93,11 +111,11 @@ def build_mesh(path: Path) -> None:
     The polygon walks counterclockwise around the silicon (slab + rib).
     Three physical groups are tagged in the resulting ``.msh``:
 
-        * ``Bulk``            — the silicon surface (2D).
-        * ``anode_contact``   — the line segment on top of the slab at
-                                ``x ≈ -center_contact`` where the anode metal
+        * ``Bulk``            - the silicon surface (2D).
+        * ``anode_contact``   - the line segment on top of the slab at
+                                ``x ~ -center_contact`` where the anode metal
                                 would sit.
-        * ``cathode_contact`` — the equivalent on the +x side.
+        * ``cathode_contact`` - the equivalent on the +x side.
 
     Mesh sizing comes from ``params.py``: ``max_edge_length_override`` at the
     rib corners (~7 nm) to resolve the depletion-edge gradient, and the
@@ -142,8 +160,8 @@ def build_mesh(path: Path) -> None:
     ]
     n = len(pts)
     lines = [geo.add_line(pts[i], pts[(i + 1) % n]) for i in range(n)]
-    # lines[3] = (cathode outer) -> (cathode inner)  ← cathode contact
-    # lines[9] = (anode inner)   -> (anode outer)    ← anode contact
+    # lines[3] = (cathode outer) -> (cathode inner)  <- cathode contact
+    # lines[9] = (anode inner)   -> (anode outer)    <- anode contact
 
     loop = geo.add_curve_loop(lines)
     surface = geo.add_plane_surface([loop])
@@ -189,11 +207,11 @@ def set_doping() -> None:
         * pepi:      constant p-type background (``PEPI_CONC``) everywhere.
         * p++ implant: Gaussian peak ``surface_conc_p`` at the top of the
                        slab, decaying downward with sigma = slab/3; bounded
-                       laterally to ``[x_center_p ± x_span_p/2]``.
+                       laterally to ``[x_center_p +/- x_span_p/2]``.
         * n++ implant: same shape on the opposite side of the rib.
 
     Step functions implement the lateral implant window. DEVSIM evaluates
-    these expressions per node — ``x`` and ``y`` refer to node coordinates.
+    these expressions per node - ``x`` and ``y`` refer to node coordinates.
     """
     # All geometry in cm (DEVSIM CGS); concentrations in cm^-3.
     p_left = (p.x_center_p - p.x_span_p / 2) * M2CM
@@ -228,7 +246,7 @@ def set_doping() -> None:
     )
     node_model(
         device=DEVICE, region=REGION, name="Donors",
-        equation=f"{n_implant};",
+        equation=f"{DONOR_FLOOR:.6e} + {n_implant};",
     )
     node_model(
         device=DEVICE, region=REGION, name="NetDoping",
@@ -250,6 +268,82 @@ def initial_potential_solution() -> None:
     solve(type="dc", absolute_error=1.0, relative_error=1e-10, maximum_iterations=30)
 
 
+def _scharfetter_lifetime_expr(doping_expr: str, tau_max: float) -> str:
+    """Return a DEVSIM expression for the Scharfetter doping-dependent lifetime.
+
+    Mirrors ``physics.scharfetter_lifetime`` (same constants) as a string in
+    terms of a total-doping sub-expression, e.g. ``(Acceptors + Donors)``.
+    """
+    return (
+        f"{ph.SRH_TAU_MIN:.6e}"
+        f" + ({tau_max:.6e} - {ph.SRH_TAU_MIN:.6e})"
+        f" / (1 + ({doping_expr} / {ph.SRH_NREF:.6e})^{ph.SRH_GAMMA:.6e})"
+    )
+
+
+def create_recombination(device: str, region: str) -> None:
+    """Define ``ElectronGeneration`` / ``HoleGeneration`` from SRH + Auger.
+
+    Replaces ``simple_physics.CreateSRH`` (SRH-only, fixed 10 us lifetime, no
+    Auger). SRH here uses a doping-dependent Scharfetter lifetime; Auger caps
+    the high-injection density the forward-biased PIN reaches above ~1e18
+    cm^-3. The continuity equations reference the two generation models by
+    name, so defining them is all ``CreateECE`` / ``CreateHCE`` need. ``n_i``
+    and ``ElectronCharge`` come from ``SetSiliconParameters``.
+    """
+    set_parameter(device=device, region=region, name="auger_n", value=ph.AUGER_CN)
+    set_parameter(device=device, region=region, name="auger_p", value=ph.AUGER_CP)
+
+    # Lifetimes depend on total impurity concentration only (no carrier
+    # dependence), so they need no carrier derivatives.
+    total_doping = "(Acceptors + Donors)"
+    CreateNodeModel(
+        device, region, "tau_n", _scharfetter_lifetime_expr(total_doping, ph.SRH_TAU_N)
+    )
+    CreateNodeModel(
+        device, region, "tau_p", _scharfetter_lifetime_expr(total_doping, ph.SRH_TAU_P)
+    )
+
+    usrh = (
+        "(Electrons*Holes - n_i^2)"
+        " / (tau_p*(Electrons + n_i) + tau_n*(Holes + n_i))"
+    )
+    uauger = "(auger_n*Electrons + auger_p*Holes) * (Electrons*Holes - n_i^2)"
+    urecomb = f"({usrh}) + ({uauger})"
+    CreateNodeModel(device, region, "Urecomb", urecomb)
+    for var in ("Electrons", "Holes"):
+        CreateNodeModelDerivative(device, region, "Urecomb", urecomb, var)
+
+    gn = "-ElectronCharge * Urecomb"
+    gp = "+ElectronCharge * Urecomb"
+    CreateNodeModel(device, region, "ElectronGeneration", gn)
+    CreateNodeModel(device, region, "HoleGeneration", gp)
+    for var in ("Electrons", "Holes"):
+        CreateNodeModelDerivative(device, region, "ElectronGeneration", gn, var)
+        CreateNodeModelDerivative(device, region, "HoleGeneration", gp, var)
+
+
+def create_silicon_dd(device: str, region: str) -> None:
+    """Assemble the drift-diffusion system with SRH + Auger recombination and
+    Klaassen bulk mobility.
+
+    Mirrors ``simple_physics.CreateSiliconDriftDiffusion`` but swaps its
+    SRH-only ``CreateSRH`` for ``create_recombination`` and the constant
+    ``mu_n`` / ``mu_p`` for the Klaassen unified low-field mobility (doping +
+    carrier-carrier dependent) as edge models ``mu_bulk_e`` / ``mu_bulk_h``.
+    Velocity saturation is deferred - it needs the element-based current
+    formulation. Requires ``Electrons``, ``Holes``, ``Donors``, ``Acceptors``
+    to already exist.
+    """
+    CreatePE(device, region)
+    CreateBernoulli(device, region)
+    create_recombination(device, region)
+    Set_Mobility_Parameters(device, region)
+    Klaassen_Mobility(device, region)
+    CreateECE(device, region, "mu_bulk_e")
+    CreateHCE(device, region, "mu_bulk_h")
+
+
 def initial_dd_solution() -> None:
     """Activate the drift-diffusion equations and resolve at equilibrium.
 
@@ -267,30 +361,37 @@ def initial_dd_solution() -> None:
         device=DEVICE, region=REGION, name="Holes",
         init_from="IntrinsicHoles",
     )
-    CreateSiliconDriftDiffusion(DEVICE, REGION)
+    create_silicon_dd(DEVICE, REGION)
     for contact in ("anode", "cathode"):
         CreateSiliconDriftDiffusionAtContact(DEVICE, REGION, contact)
     solve(type="dc", absolute_error=1e10, relative_error=1e-10, maximum_iterations=50)
 
 
-def voltage_sweep() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def voltage_sweep(
+    voltages: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Sweep anode voltage and collect carrier densities at each step.
 
-    The cathode stays at 0 V. The anode is stepped from ``voltage_start`` to
-    ``voltage_stop`` inclusive in ``voltage_interval`` increments. At each
-    bias point the converged Electrons and Holes node arrays are pulled
-    from DEVSIM and stored.
+    The cathode stays at 0 V. At each bias point the converged Electrons and
+    Holes node arrays are pulled from DEVSIM and stored.
+
+    Args:
+        voltages: explicit anode bias points [V]. Defaults to the full
+            ``voltage_start`` -> ``voltage_stop`` sweep from ``params``; a short
+            list is handy for the integration test.
 
     Returns:
         A tuple ``(V, x, y, n, p)`` where ``V`` is shape ``(n_V,)``, ``x``
         and ``y`` are node coordinates shape ``(N,)`` in metres, and
         ``n``, ``p`` carrier-density arrays are shape ``(n_V, N)`` in m^-3.
     """
-    voltages = np.arange(
-        p.voltage_start,
-        p.voltage_stop + p.voltage_interval / 2,
-        p.voltage_interval,
-    )
+    if voltages is None:
+        voltages = np.arange(
+            p.voltage_start,
+            p.voltage_stop + p.voltage_interval / 2,
+            p.voltage_interval,
+        )
+    voltages = np.asarray(voltages, dtype=float)
     # Node coordinates are in cm (DEVSIM CGS); convert to m for downstream.
     x = np.asarray(get_node_model_values(device=DEVICE, region=REGION, name="x")) / M2CM
     y = np.asarray(get_node_model_values(device=DEVICE, region=REGION, name="y")) / M2CM
@@ -329,7 +430,7 @@ def sample_to_grid(
 
     Linear interpolation is used; nodes outside the silicon polygon (the gap
     above the slab outside the rib, between the rib and the contacts) fall
-    back to 0 — those points won't be in the silicon region of the mode
+    back to 0 - those points won't be in the silicon region of the mode
     solver anyway.
 
     Args:
