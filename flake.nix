@@ -53,12 +53,24 @@
         '';
         runScript = "bash";
       };
+      # Lightweight shell for direnv / IDE use: tools on PATH, env vars set,
+      # but no bwrap namespace. DEVSIM still requires `nix run` (FHS env).
+      devShell = pkgs.mkShell {
+        packages = with pkgs; [ uv python312 gmsh ];
+        shellHook = ''
+          export DEVSIM_MATH_LIBS=libmkl_rt.so
+          export UV_PYTHON=${pkgs.python312}/bin/python3.12
+        '';
+      };
     in {
-      # `nix develop` → interactive shell inside FHS.
-      devShells.${system}.default = fhs.env;
+      # Default devShell is bwrap-free so direnv enter/exit works without
+      # namespace nesting errors. Use `nix develop .#fhs` for a full FHS shell.
+      devShells.${system} = {
+        default = devShell;
+        fhs = fhs.env;
+      };
 
       # `nix run . -- -c "command"` → scripted invocation inside FHS.
-      # Also what direnv's `use flake .` will pick up if it bypasses `.env`.
       apps.${system}.default = {
         type = "app";
         program = "${fhs}/bin/devsim-shell";
