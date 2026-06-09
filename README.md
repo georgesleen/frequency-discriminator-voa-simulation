@@ -32,23 +32,65 @@ into the rib.
    `src/modulator_neff_V.dat` along with a `neff_vs_V.png` plot for a quick
    visual check.
 
-## Setup
+4. `src/visualize.py` reads `carriers.npz` and writes `src/carrier_maps.png`
 
-The DEVSIM solver loads Intel's MKL math library at runtime, so the developer
-shell is a self-contained (FHS) environment that supplies MKL, the gmsh mesh
-generator, and the uv package manager.
+   > electron density across the slab and the injected-carrier change near the
+   > rib, at four voltages.
+
+5. `src/compare_lumerical.py` overlays `src/modulator_neff_V.dat` against a
+   Lumerical export (`lumerical_data.dat` at the repo root by default, or a path
+   passed as the first argument), prints a side-by-side table, and writes
+   `src/compare_neff.png`.
+
+### Nix
+
+With direnv configured, `cd` into the repo and the shell loads automatically.
+Otherwise:
 
 ```bash
 nix develop
 uv sync
 ```
 
-On non-NixOS Linux, install MKL (for example `pip install mkl`) and then run
-`uv sync`. Do not substitute OpenBLAS for MKL: DEVSIM's bundled linear-algebra
-routine miscalls it and crashes during the solve.
+### Linux
 
-On Windows, use WSL2 with Ubuntu and follow the Linux steps inside it; the Nix
-and DEVSIM toolchain has no native-Windows path.
+Install Nix (Determinate installer):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+Enable flakes:
+
+```bash
+mkdir -p ~/.config/nix/
+echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+```
+
+Install direnv through Nix (the apt package is too old to support `use flake`):
+
+```bash
+nix profile add nixpkgs#direnv
+```
+
+Add the shell hook and reload:
+
+```bash
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+exec bash
+```
+
+Then allow direnv in the project (this runs `nix develop` for you on entry):
+
+```bash
+direnv allow
+uv sync
+```
+
+### Windows
+
+Use WSL2 with Ubuntu and follow the Linux steps inside it; the Nix and DEVSIM
+toolchain has no native-Windows path.
 
 ```powershell
 wsl --install -d Ubuntu-24.04
@@ -57,9 +99,15 @@ wsl --install -d Ubuntu-24.04
 ## Run
 
 ```bash
-uv run src/charge_sim.py
-uv run src/mode_sim.py
+uv run src/charge_sim.py              # carriers.npz
+uv run src/mode_sim.py                # modulator_neff_V.dat, neff_vs_V.png
+uv run src/visualize.py               # carrier_maps.png
+uv run src/compare_lumerical.py       # compare_neff.png (needs lumerical_data.dat)
 ```
+
+`make sim` runs the charge solve, mode solve, and visualize in order; the
+`charge`, `mode`, and `viz` targets run them individually (each wraps the
+command in `nix run` so it gets the FHS shell).
 
 ## Output
 
