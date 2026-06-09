@@ -1,93 +1,90 @@
-# Python port of the Lumerical CHARGE + MODE pipeline
+# Frequency Discriminator VOA Simulation
 
-Open-source reimplementation of the two ANSYS Lumerical scripts that ship
-with the SIEPIC Active frequency-discriminator supplemental document
-(`../Charge_Simulation.lsf`, `../Mode_Simulation.lsf`). Emits the same
-`modulator_neff_V.dat` for direct comparison against a collaborator's
-Lumerical run.
+A Python port of a Lumerical CHARGE + MODE pipeline that models a
+silicon-on-insulator (SOI) PIN optical modulator in cross-section.
 
-## What runs where
+## Overview
 
-| Stage         | Original (Lumerical)    | This port (Python)                         |
-| ------------- | ----------------------- | ------------------------------------------ |
-| Geometry      | `PN_Junction_Setup.lsf` | `params.py`                                |
-| CHARGE        | `Charge_Simulation.lsf` | `charge_sim.py` (DEVSIM, drift-diffusion)  |
-| MODE/FDE      | `Mode_Simulation.lsf`   | `mode_sim.py`  (femwell, FEM eigenmode)    |
-| Soref-Bennett | `np density model`      | inline in `mode_sim.py`                    |
+The simulated cross-section is a 220 nm SOI rib waveguide (500 nm wide, a 130 nm
+rib on a 90 nm slab) with a lateral PIN junction: p++ and n++ implants
+($4 \times 10^{20}\ \mathrm{cm}^{-3}$ surface concentration) about 2 um to
+either side of the rib, a lightly-doped p-epi region in the middle, and metal
+contacts on the slab outboard of the implants. The wavelength is 1550 nm. The
+anode (p side) is swept from $0$ to $4$ V in 0.1 V steps while the cathode (n
+side) is grounded, which forward-biases the junction and injects free carriers
+into the rib.
+
+## Repo Structure
+
+1. `src/params.py` geometry, doping levels, and voltage sweep. Values are in SI
+   units.
+
+2. `src/charge_sim.py` builds a mesh of the cross-section and runs a DEVSIM
+   drift-diffusion simulation at each bias point, sweeping the applied voltage
+   from $0$ to $4$ V. Drift-diffusion is the standard physics model for how
+   electrons and holes move through a semiconductor under an applied voltage.
+   The resulting carrier densities are written to `src/carriers.npz`.
+
+3. `src/mode_sim.py` reads those carrier densities, converts them into a local
+   change in refractive index via the carrier-to-index relations, and then
+   solves for the shape and speed of the guided light mode using the femwell
+   finite-element solver. It does this at every voltage and writes
+   `src/modulator_neff_V.dat` along with a `neff_vs_V.png` plot for a quick
+   visual check.
 
 ## Setup
 
-### NixOS
+The DEVSIM solver loads Intel's MKL math library at runtime, so the developer
+shell is a self-contained (FHS) environment that supplies MKL, the gmsh mesh
+generator, and the uv package manager.
 
 ```bash
-nix develop        # drops you into an FHS bash with mkl, gmsh, uv
-uv sync            # populates .venv with DEVSIM, femwell, etc.
+nix develop
+uv sync
 ```
 
-The devshell is `pkgs.buildFHSEnv`, not `mkShell`. DEVSIM's pip wheel is
-manylinux and dlopens `libmkl_rt.so` at runtime; FHS is the cleanest way to
-give it `/usr/lib/libmkl_rt.so` without `LD_LIBRARY_PATH` gymnastics. MKL
-is unfree (Intel SSL) — the flake narrows `allowUnfreePredicate` to that
-one package.
+On non-NixOS Linux, install MKL (for example `pip install mkl`) and then run
+`uv sync`. Do not substitute OpenBLAS for MKL: DEVSIM's bundled linear-algebra
+routine miscalls it and crashes during the solve.
 
-### Other Linux
+On Windows, use WSL2 with Ubuntu and follow the Linux steps inside it; the Nix
+and DEVSIM toolchain has no native-Windows path.
 
-DEVSIM officially supports AlmaLinux 8 / RHEL 8 with MKL. On other
-distros, follow DEVSIM's INSTALL.md: install MKL (`conda install mkl` or
-`pip install mkl`), then `uv sync`. Do **not** point `DEVSIM_MATH_LIBS` at
-OpenBLAS — DEVSIM's bundled UMFPACK miscalls OpenBLAS's `DGER` and
-segfaults during the Newton solve.
+```powershell
+wsl --install -d Ubuntu-24.04
+```
 
 ## Run
 
 ```bash
-# inside `nix develop`
-uv run src/charge_sim.py     # → src/carriers.npz   (+ pin_mesh.msh)
-uv run src/mode_sim.py       # → src/modulator_neff_V.dat + neff_vs_V.png
-
-# or one-shot from outside the shell
-nix run . -- -c "uv run src/charge_sim.py"
+uv run src/charge_sim.py
+uv run src/mode_sim.py
 ```
 
-`charge_sim.py` takes the bulk of the wall time (41-point voltage sweep,
-drift-diffusion at each). `mode_sim.py` is comparatively fast (one FEM
-eigenmode solve per voltage).
+## Output
 
-## Outputs
+`src/modulator_neff_V.dat` holds three whitespace-separated columns: the bias
+voltage, the real part of the change in effective index
+$\mathrm{Re}(\Delta n_\text{eff})$ (which governs the phase shift), and the
+imaginary part $\mathrm{Im}(n_\text{eff})$ (which governs optical loss). Compare
+against the Lumerical run.
 
-- **`carriers.npz`** — `{V, x, y, n, p}`. Electron and hole densities (m⁻³)
-  on a regular grid covering the silicon cross-section, one slice per
-  voltage step. Analog of Lumerical's `PIN_Charge.mat`.
-- **`modulator_neff_V.dat`** — three whitespace-separated columns:
-  `V, Re(Δneff), Im(neff)`. Same layout the LSF emits. **This is the
-  artifact to ship to the collaborator for diffing.**
-- **`neff_vs_V.png`** — relative phase per cm + loss per cm, for quick
-  visual inspection.
+## Limitations
 
-## Comparison procedure
+- The DEVSIM solver ships as a prebuilt binary that expects to find Intel's MKL
+  math library. The typically bundled math package OpenBLAS doesn't work.
 
-1. Send `../PN_Junction_Setup.lsf`, `../Charge_Simulation.lsf`,
-   `../Mode_Simulation.lsf` to the collaborator.
-2. Have them run the LSF pipeline and return their `modulator_neff_V.dat`.
-3. Diff column-by-column. Target tolerances:
-   - `Re(Δneff)`: <5 % relative error
-   - `Im(neff)`:  <10 % relative error
+- DEVSIM's built-in silicon physics is written in centimetre-gram-second units,
+  while the rest of the project works in SI.
 
-Larger discrepancies usually trace back to one of three places: mesh
-density in the rib, the assumed p-epi background concentration
-(`PEPI_CONC` in `charge_sim.py` — the LSF leaves it implicit), or the
-implant Gaussian vertical sigma.
+- Smaller compatibility constraints: DEVSIM only reads the legacy mesh file
+  format, and one of the plotting dependencies has no build for the newest
+  Python, which pins the supported interpreter range.
 
-## Known caveats
+- **Background doping.** The original script applies a lightly doped silicon
+  background without stating its concentration. This port assumes
+  $1 \times 10^{15}\ \mathrm{cm}^{-3}$. The equilibrium carrier baseline, and
+  therefore the magnitude of $\Delta n_\text{eff}$, scales with this choice.
 
-- **p-epi concentration assumption** — the LSF's `adddope; ...; pepi` call
-  does not specify a value. `charge_sim.py` assumes 1 × 10¹⁵ cm⁻³. If
-  Lumerical's default differs, the equilibrium carrier baseline will be
-  off and Δneff will scale with it.
-- **Implant profile** — modelled as a lateral step × vertical Gaussian
-  with σ = `thick_slab / 3`. The LSF uses Lumerical's built-in implant
-  Gaussian with `junction_width = 0`; the exact internal sigma is not
-  documented in the supplemental.
-- **Soref-Bennett coefficients** — using the original 1987 values (the
-  same set Lumerical's "Soref and Bennet" option applies). For more recent
-  calibrations see Nedeljkovic et al. 2011.
+- **Implant profile.** The doping that defines the junction is modeled as a
+  lateral step with a Gaussian falloff in depth.
