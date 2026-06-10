@@ -71,3 +71,14 @@ nix run . -- -c "uv run src/mode_sim.py"
   absent (`Donors = 0`). A 1 cm^-3 floor is numerically negligible against the
   1e15 p-epi and 4e20 implant levels. Acceptors need no floor (p-epi background
   already keeps them >=1e15).
+- `src/charge_sim.py` adds surface recombination via `SurfaceMask * Us /
+  NodeVolume^0.5` inside the bulk `Urecomb` expression (`create_recombination`)
+  rather than through a contact equation -
+  **Why:** DEVSIM's `contact_equation` `edge_model` only evaluates on 1D
+  contact boundary elements (not interior bulk triangle edges), so contact-based
+  surface recombination completely decouples boundary nodes from the interior
+  domain and has zero effect on the rib core density. The bulk-node-model
+  approach adds the surface term to the normal FVM equation at boundary nodes,
+  where it does couple through standard interior edge fluxes. `physics.SRV_SI_SIO2`
+  is an effective fit parameter (calibrated to ~8e18 cm^-3 core injection at
+  V=1.5 V), not a physical Si/SiO2 SRV (which would be 10-10000 cm/s).

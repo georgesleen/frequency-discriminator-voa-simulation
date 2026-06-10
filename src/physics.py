@@ -43,6 +43,15 @@ SRH_TAU_P = 3.0e-6      # hole tau_max [s]
 SRH_NREF = 1.0e16       # reference concentration [cm^-3]
 SRH_GAMMA = 1.0
 
+# --- Si/SiO2 surface recombination velocity --------------------------------
+# Effective fitting parameter applied at Si/SiO2 interface boundary nodes via
+# the bulk Urecomb expression (SurfaceMask * Us / NodeVolume^0.5 in charge_sim).
+# NodeVolume^0.5 converts the surface rate to a volumetric equivalent using the
+# Voronoi cell size as an effective thickness. This value is calibrated to match
+# Lumerical's rib-core injection level (~8e18 cm^-3) at V=1.5 V; it is NOT a
+# physical Si/SiO2 SRV (which would be 10-10000 cm/s). Set to 0 to disable.
+SRV_SI_SIO2 = 0.0    # cm/s -- disabled; see comment above
+
 
 def soref_bennett(dNe: np.ndarray, dNh: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Compute dn and dalpha from carrier-density changes.

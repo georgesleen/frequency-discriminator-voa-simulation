@@ -281,6 +281,50 @@ def _scharfetter_lifetime_expr(doping_expr: str, tau_max: float) -> str:
     )
 
 
+def _surface_mask_expr() -> str:
+    """DEVSIM expression: 1 at Si/SiO2 interface boundary nodes, 0 interior.
+
+    Uses step() on the node coordinate models x, y (built-in in DEVSIM) to
+    identify the boundary lines of the L-shaped silicon polygon that are NOT
+    the anode or cathode contacts. The result is used in Urecomb to add surface
+    recombination to boundary nodes through the bulk DD equation.
+
+    step(a) = 1 when a >= 0; tolerance eps = 1 nm.
+    """
+    xs = p.width_slab / 2 * M2CM
+    rs = p.width_rib / 2 * M2CM
+    y1 = p.thick_slab * M2CM
+    y2 = (p.thick_slab + p.thick_rib) * M2CM
+    cl = (p.center_contact - p.width_contact / 2) * M2CM  # anode/cathode inner edge
+    cr = (p.center_contact + p.width_contact / 2) * M2CM  # anode/cathode outer edge
+    eps = 1e-7  # 1 nm in cm
+
+    def gt(var, val):  # var >= val
+        return f"step({var} - {val:.6e})"
+
+    def lt(var, val):  # var <= val
+        return f"step({val:.6e} - {var})"
+
+    def near(var, val):  # |var - val| <= eps
+        return f"(step({var} - {val - eps:.6e}) * step({val + eps:.6e} - {var}))"
+
+    at_y1 = near("y", y1)
+
+    parts = [
+        lt("y", eps),                                                    # slab bottom
+        gt("x", xs - eps),                                               # slab right wall
+        lt("x", -xs + eps),                                              # slab left wall
+        f"({at_y1} * {gt('x', cr - eps)})",                             # slab top: right of cathode
+        f"({at_y1} * {gt('x', rs - eps)} * {lt('x', cl + eps)})",      # slab top: cathode-rib gap
+        f"({at_y1} * {gt('x', -cl - eps)} * {lt('x', -rs + eps)})",    # slab top: rib-anode gap
+        f"({at_y1} * {lt('x', -cr + eps)})",                            # slab top: left of anode
+        f"({gt('x', rs - eps)} * {gt('y', y1 - eps)})",                 # rib right wall
+        gt("y", y2 - eps),                                               # rib top
+        f"({lt('x', -rs + eps)} * {gt('y', y1 - eps)})",                # rib left wall
+    ]
+    return f"ifelse(({' + '.join(parts)}) > 0, 1, 0)"
+
+
 def create_recombination(device: str, region: str) -> None:
     """Define ``ElectronGeneration`` / ``HoleGeneration`` from SRH + Auger.
 
@@ -309,7 +353,25 @@ def create_recombination(device: str, region: str) -> None:
         " / (tau_p*(Electrons + n_i) + tau_n*(Holes + n_i))"
     )
     uauger = "(auger_n*Electrons + auger_p*Holes) * (Electrons*Holes - n_i^2)"
-    urecomb = f"({usrh}) + ({uauger})"
+
+    if ph.SRV_SI_SIO2 > 0.0:
+        # Surface recombination via the BULK equation at boundary nodes.
+        # SurfaceMask selects the Si/SiO2 interface nodes using coordinate
+        # step() checks. NodeVolume^0.5 converts the surface rate Us [cm^-2/s]
+        # to a volumetric equivalent [cm^-3/s] via d_eff ~ sqrt(Voronoi cell
+        # area) at each boundary node -- spatially correct (fine mesh near the
+        # rib gives small d_eff, as expected for a thin-film approximation).
+        set_parameter(device=device, region=region, name="srv", value=ph.SRV_SI_SIO2)
+        surf_mask = _surface_mask_expr()
+        CreateNodeModel(device, region, "SurfaceMask", surf_mask)
+        usurf = (
+            "srv * (Electrons*Holes - n_i^2)"
+            " / (Electrons + Holes + 2*n_i)"
+            " * SurfaceMask / NodeVolume^0.5"
+        )
+        urecomb = f"({usrh}) + ({uauger}) + ({usurf})"
+    else:
+        urecomb = f"({usrh}) + ({uauger})"
     CreateNodeModel(device, region, "Urecomb", urecomb)
     for var in ("Electrons", "Holes"):
         CreateNodeModelDerivative(device, region, "Urecomb", urecomb, var)
