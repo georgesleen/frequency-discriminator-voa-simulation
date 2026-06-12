@@ -53,22 +53,27 @@ SRH_GAMMA = 1.0
 SRV_SI_SIO2 = 0.0    # cm/s -- disabled; see comment above
 
 
-def soref_bennett(dNe: np.ndarray, dNh: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute dn and dalpha from carrier-density changes.
+def soref_bennett(Ne: np.ndarray, Nh: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Compute dn and dalpha from carrier densities using the Soref-Bennett model.
 
     Args:
-        dNe: change in electron density vs equilibrium [cm^-3].
-        dNh: change in hole density vs equilibrium [cm^-3].
+        Ne: electron carrier density [cm^-3]. May be absolute or a delta; the
+            formula is linear in Ne so both give consistent results when used
+            consistently. Pass absolute densities and subtract the V=0 result
+            to correctly handle the non-linear (power-law) hole term.
+        Nh: hole carrier density [cm^-3]. The power-law exponent (0.8) means
+            applying this to a delta (p(V)-p(0)) is only accurate when
+            p(V) >> p(0). For the general case, call this function twice --
+            once with absolute densities at V and once at V=0 -- and subtract.
 
     Returns:
         ``(dn, dalpha)`` - real-index change [dimensionless] and intensity
-        absorption change [1/cm]. Positive carrier density gives negative dn
-        (carriers lower the index) and positive dalpha (carriers add loss).
-        Negative dN is clipped to 0 in the hole power-law term, which is
-        defined only for positive arguments.
+        absorption change [1/cm]. Larger carrier density gives more negative dn
+        (free carriers reduce the index) and positive dalpha (adds loss).
+        Negative Nh is clipped to 0 in the power-law term.
     """
-    dn = -SB_DN_E * dNe - SB_DN_H_A * np.power(np.maximum(dNh, 0.0), SB_DN_H_B)
-    da = SB_DA_E * dNe + SB_DA_H * dNh
+    dn = -SB_DN_E * Ne - SB_DN_H_A * np.power(np.maximum(Nh, 0.0), SB_DN_H_B)
+    da = SB_DA_E * Ne + SB_DA_H * Nh
     return dn, da
 
 

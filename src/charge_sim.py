@@ -218,7 +218,12 @@ def set_doping() -> None:
     p_right = (p.x_center_p + p.x_span_p / 2) * M2CM
     n_left = (p.x_center_n - p.x_span_n / 2) * M2CM
     n_right = (p.x_center_n + p.x_span_n / 2) * M2CM
-    sigma_y = p.thick_slab / 3.0 * M2CM
+    # Lumerical adddiffusion Gaussian: N(y) = surface_conc * exp(-((y_top-y)/sigma)^2)
+    # At y = 0: N = ref_conc => sigma = slab / sqrt(ln(surface_conc / ref_conc)).
+    # Both p++ and n++ share the same surface/ref concentrations.
+    sigma_y = (
+        p.thick_slab / np.sqrt(np.log(p.surface_conc_p / p.reference_conc_p))
+    ) * M2CM
     y_top = p.thick_slab * M2CM  # implant source face (LSF face_p = 5 = upper z)
     conc_p_cm3 = p.surface_conc_p * M3_TO_CM3
     conc_n_cm3 = p.surface_conc_n * M3_TO_CM3
@@ -227,7 +232,9 @@ def set_doping() -> None:
         """Return a DEVSIM expression for an implant profile.
 
         Step function in x within ``[xl, xr]``; Gaussian in y decaying from
-        ``y_top`` downward with the shared sigma.
+        ``y_top`` downward. sigma is derived from the Lumerical adddiffusion
+        parameters: surface_conc / ref_conc over the slab depth, matching
+        the profile exactly (not a free parameter).
         """
         return (
             f"{conc:.6e}"

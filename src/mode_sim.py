@@ -94,10 +94,13 @@ def make_perturbation_callable(
 ):
     """Return a callable dn_complex(x_um, y_um) for a single voltage step.
 
-    Subtracts the V = 0 baseline from the carrier fields, applies
-    Soref-Bennett, converts dalpha to imag(n) via lambda/(4pi), and wraps the result
-    in a RegularGridInterpolator. The callable is what
-    ``basis.project(...)`` consumes to assemble a per-element perturbation.
+    Applies Soref-Bennett to the absolute carrier densities at voltage V and
+    at V=0, then takes the difference. This correctly handles the non-linear
+    hole term (Nh^0.8): applying it to a delta instead of to absolute values
+    inflates the result by up to ~100x at low bias where p(V) ~ p(0).
+    Converts dalpha to imag(n) via lambda/(4pi) and wraps the result in a
+    RegularGridInterpolator. The callable is what ``basis.project(...)``
+    consumes to assemble a per-element perturbation.
 
     Args:
         x_si, y_si: carrier-grid coordinates in metres (from carriers.npz).
@@ -109,9 +112,17 @@ def make_perturbation_callable(
         A function mapping micron-scale (x, y) -> complex dn. Both inputs may
         be scalars or arrays.
     """
-    dNe = (n_field[v_idx] - n_field[0]) * 1e-6  # m^-3 -> cm^-3
-    dNh = (p_field[v_idx] - p_field[0]) * 1e-6
-    dn_real, da = soref_bennett(dNe, dNh)
+    # Apply SB to absolute carrier densities, then difference against V=0.
+    # Applying the power-law hole term to the *delta* is only accurate when
+    # p(V) >> p(0); at low bias (p(V) ~ p(0)) it inflates dn_h by up to 100x.
+    Ne_v = n_field[v_idx] * 1e-6   # m^-3 -> cm^-3
+    Nh_v = p_field[v_idx] * 1e-6
+    Ne_0 = n_field[0] * 1e-6
+    Nh_0 = p_field[0] * 1e-6
+    dn_v, da_v = soref_bennett(Ne_v, Nh_v)
+    dn_0, da_0 = soref_bennett(Ne_0, Nh_0)
+    dn_real = dn_v - dn_0
+    da = da_v - da_0
     # imag(n) = alpha [1/cm] x lambda [cm] / (4pi), where alpha is intensity absorption.
     wavelength_cm = p.WAVELENGTH * 1e2
     dn_imag = da * wavelength_cm / (4 * np.pi)
